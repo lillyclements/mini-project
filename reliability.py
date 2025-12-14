@@ -408,51 +408,177 @@ def run_convergence_test():
     print("=" * 70)
  
 # ============================================================================
-# MAIN EXECUTION
+# COMMAND LINE INTERFACE
 # ============================================================================
 
-if __name__ == "__main__":
-    print("=" * 70)
+def main():
+    """Main CLI entry point."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Spacecraft Reliability Monte Carlo Tool - ASTE 404 Mini-Project',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic run with default 5-subsystem configuration
+  python reliability.py --run basic
+  
+  # Custom failure probabilities
+  python reliability.py --run basic --failures 0.01 0.02 0.015 --samples 50000
+  
+  # Run convergence study
+  python reliability.py --run convergence
+  
+  # Run redundancy trade study
+  python reliability.py --run redundancy
+  
+  # Run all analyses
+  python reliability.py --run all
+  
+  # Custom system with redundancy
+  python reliability.py --run basic --failures 0.01 0.02 0.03 --redundancy 1 2 1 --samples 100000
+        """
+    )
+    
+    parser.add_argument('--run', type=str, 
+                       choices=['basic', 'convergence', 'redundancy', 'all'],
+                       default='all',
+                       help='Which analysis to run (default: all)')
+    
+    parser.add_argument('--failures', type=float, nargs='+',
+                       default=[0.01, 0.02, 0.015, 0.01, 0.025],
+                       help='Failure probability for each subsystem (default: [0.01, 0.02, 0.015, 0.01, 0.025])')
+    
+    parser.add_argument('--samples', type=int, default=100000,
+                       help='Number of Monte Carlo samples (default: 100000)')
+    
+    parser.add_argument('--redundancy', type=int, nargs='+', default=None,
+                       help='Redundancy level for each subsystem (default: all 1, no redundancy)')
+    
+    args = parser.parse_args()
+    
+    # Validate inputs
+    if args.redundancy is not None:
+        if len(args.redundancy) != len(args.failures):
+            print("ERROR: Number of redundancy values must match number of subsystems")
+            return
+    else:
+        args.redundancy = [1] * len(args.failures)
+    
+    # Print header
+    print("\n" + "=" * 70)
     print("SPACECRAFT RELIABILITY MONTE CARLO TOOL")
     print("=" * 70)
     print()
-    
-    # Define a test system with 5 subsystems
-    failure_probs = [0.01, 0.02, 0.015, 0.01, 0.025]
-    
-    print("Test System Configuration:")
-    print(f"  Number of subsystems: {len(failure_probs)}")
-    print(f"  Failure probabilities: {failure_probs}")
+    print("System Configuration:")
+    print(f"  Number of subsystems: {len(args.failures)}")
+    print(f"  Failure probabilities: {args.failures}")
+    print(f"  Redundancy levels:     {args.redundancy}")
+    print(f"  Monte Carlo samples:   {args.samples:,}")
     print()
     
-    # ===== PART 1: Basic Monte Carlo Test =====
-    n_samples = 100000
-    print(f"Running Monte Carlo with {n_samples:,} samples...")
-    mc_result = monte_carlo_reliability(failure_probs, n_samples)
-    analytical_result = analytical_reliability(failure_probs)
+    # Run requested analysis
+    if args.run in ['basic', 'all']:
+        print("=" * 70)
+        print("BASIC RELIABILITY ANALYSIS")
+        print("=" * 70)
+        print()
+        
+        # Run MC simulation
+        mc_result = monte_carlo_reliability_with_redundancy(
+            args.failures, args.redundancy, args.samples)
+        
+        # Calculate analytical (only if no redundancy or simple redundancy)
+        if all(r == 1 for r in args.redundancy):
+            analytical_result = analytical_reliability(args.failures)
+            print(f"Monte Carlo estimate: {mc_result:.6f} ({mc_result*100:.2f}%)")
+            print(f"Analytical solution:  {analytical_result:.6f} ({analytical_result*100:.2f}%)")
+            print(f"Absolute error:       {abs(mc_result - analytical_result):.6f}")
+        else:
+            analytical_result = analytical_reliability_with_redundancy(
+                args.failures, args.redundancy)
+            print(f"Monte Carlo estimate: {mc_result:.6f} ({mc_result*100:.2f}%)")
+            print(f"Analytical solution:  {analytical_result:.6f} ({analytical_result*100:.2f}%)")
+            print(f"Absolute error:       {abs(mc_result - analytical_result):.6f}")
+        
+        print()
+        print(f"Mission Success Probability: {mc_result*100:.2f}%")
+        print(f"Mission Failure Probability: {(1-mc_result)*100:.2f}%")
+        print()
     
-    print()
-    print("Results:")
-    print(f"  Monte Carlo estimate: {mc_result:.6f} ({mc_result*100:.2f}%)")
-    print(f"  Analytical solution:  {analytical_result:.6f} ({analytical_result*100:.2f}%)")
-    print(f"  Absolute error:       {abs(mc_result - analytical_result):.6f}")
-    print(f"  Relative error:       {abs(mc_result - analytical_result)/analytical_result*100:.3f}%")
-    print()
+    if args.run in ['convergence', 'all']:
+        # Use base configuration (no redundancy) for convergence study
+        base_failures = args.failures
+        n_values = [100, 500, 1000, 5000, 10000, 50000, 100000, 500000]
+        
+        print("\n" + "=" * 70)
+        print("CONVERGENCE STUDY")
+        print("=" * 70)
+        print()
+        
+        analytical = analytical_reliability(base_failures)
+        print(f"Analytical reliability: {analytical:.6f}")
+        print()
+        
+        estimates, errors = convergence_study(base_failures, n_values)
+        plot_convergence(n_values, estimates, errors, analytical)
     
-    if abs(mc_result - analytical_result) < 0.001:
-        print("✓ VERIFICATION PASSED: MC estimate matches analytical solution!")
-    else:
-        print("⚠ Large error - consider increasing n_samples")
-    
-    print("=" * 70)
-    
-    # ===== PART 2: Convergence Study =====
-    run_convergence_test()
-    
-    # ===== PART 3: Redundancy Analysis =====
-    improvements, baseline = redundancy_trade_study(failure_probs, n_samples=100000)
-    plot_redundancy_trade_study(failure_probs, improvements, baseline)
+    if args.run in ['redundancy', 'all']:
+        improvements, baseline = redundancy_trade_study(args.failures, n_samples=args.samples)
+        plot_redundancy_trade_study(args.failures, improvements, baseline)
     
     print("\n" + "=" * 70)
-    print("ALL TESTS COMPLETE")
+    print("ANALYSIS COMPLETE")
     print("=" * 70)
+    print()
+
+
+# Entry point when run as script
+if __name__ == "__main__":
+    # Check if running with command line arguments
+    import sys
+    
+    if len(sys.argv) > 1:
+        # CLI mode
+        main()
+    else:
+        # Default behavior - run all tests (original behavior)
+        print("=" * 70)
+        print("SPACECRAFT RELIABILITY MONTE CARLO TOOL")
+        print("=" * 70)
+        print()
+        
+        failure_probs = [0.01, 0.02, 0.015, 0.01, 0.025]
+        
+        print("Test System Configuration:")
+        print(f"  Number of subsystems: {len(failure_probs)}")
+        print(f"  Failure probabilities: {failure_probs}")
+        print()
+        
+        # Basic test
+        n_samples = 100000
+        print(f"Running Monte Carlo with {n_samples:,} samples...")
+        mc_result = monte_carlo_reliability(failure_probs, n_samples)
+        analytical_result = analytical_reliability(failure_probs)
+        
+        print()
+        print("Results:")
+        print(f"  Monte Carlo estimate: {mc_result:.6f} ({mc_result*100:.2f}%)")
+        print(f"  Analytical solution:  {analytical_result:.6f} ({analytical_result*100:.2f}%)")
+        print(f"  Absolute error:       {abs(mc_result - analytical_result):.6f}")
+        print()
+        
+        if abs(mc_result - analytical_result) < 0.001:
+            print("✓ VERIFICATION PASSED: MC estimate matches analytical solution!")
+        
+        print("=" * 70)
+        
+        # Run all studies
+        run_convergence_test()
+        improvements, baseline = redundancy_trade_study(failure_probs, n_samples=100000)
+        plot_redundancy_trade_study(failure_probs, improvements, baseline)
+        
+        print("\n" + "=" * 70)
+        print("ALL TESTS COMPLETE")
+        print("=" * 70)
+        print("\nTip: Run 'python reliability.py --help' to see CLI options")
