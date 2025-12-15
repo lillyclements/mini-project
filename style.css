@@ -1,0 +1,15 @@
+img {
+  display: block;
+  margin: 1em auto;
+  max-width: 90%;
+  height: auto;
+}
+
+figure {
+  text-align: center;
+}
+
+figcaption {
+  font-size: 0.9em;
+  color: #444;
+}

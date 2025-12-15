@@ -1,8 +1,24 @@
 """
 Spacecraft Reliability Monte Carlo Tool
 ASTE 404 Mini-Project - Fall 2025
+Author: Lilly Clements
 
-Estimates mission reliability using Monte Carlo simulation.
+Estimates spacecraft mission reliability using Monte Carlo simulation
+with support for redundant subsystems and comprehensive verification.
+
+Key Features:
+- Monte Carlo reliability estimation for series systems
+- Analytical verification for independent subsystems
+- Convergence analysis demonstrating O(1/√N) error scaling
+- Redundancy modeling and trade study analysis
+- Statistical variance analysis across multiple runs
+- Edge case verification tests
+- Command-line interface for flexible usage
+
+Usage:
+    python reliability.py                    # Run all analyses
+    python reliability.py --help             # Show CLI options
+    python reliability.py --run basic        # Run basic analysis only
 """
 
 import numpy as np
