@@ -139,17 +139,15 @@ spacecraft-reliability/
 
 **1. Separate functions for MC and analytical solutions**
 - Enables direct comparison and verification
-- Analytical used as "ground truth"
-- Clean separation of concerns
+- Clean separation 
 
 **2. NumPy for random number generation**
 - Industry-standard library
-- Well-tested PRNG implementation
+- Well-tested pseudorandom number generator implementation
 - Fast vectorized operations available (though not used here for clarity)
 
 **3. Matplotlib for visualization**
 - Standard plotting library in scientific Python
-- Publication-quality figures
 - Saves to PNG for report inclusion
 
 **4. Command-line interface**
@@ -159,7 +157,6 @@ spacecraft-reliability/
 
 **5. Modular function design**
 - Each function has single responsibility
-- Comprehensive docstrings
 - Reusable components
 
 ### 3.3 How to Run
@@ -1195,9 +1192,11 @@ def edge_case_tests():
 
 ## References
 
+- Data Analysis Using Monte Carlo Simulation, Geeks for Geeks (23 Jul, 2025). 
 - Spacecraft systems: Fortescue (2011). *Spacecraft Systems Engineering* (4th ed.)
 - NumPy Documentation: https://numpy.org/doc/
 - Matplotlib Documentation: https://matplotlib.org/
+
 
 ---
 
