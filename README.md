@@ -4,7 +4,7 @@
 **Author:** Lilly Clements  
 **Date:** December 15, 2025  
 **Revised:** October 10, 2026 (convergence study redone, common-cause extension added, numbers corrected)  
-**GitHub Repository:** https://github.com/lillyclements/mini-project
+**GitHub Repository:** https://github.com/lillyclements/spacecraft-reliability
 
 ---
 
