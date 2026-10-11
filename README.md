@@ -2,8 +2,19 @@
 ## Spacecraft Reliability Monte Carlo Tool
 
 **Author:** Lilly Clements  
-**Date:** December 15, 2024  
+**Date:** December 15, 2025  
+**Revised:** October 10, 2026 (convergence study redone, common-cause extension added, numbers corrected)  
 **GitHub Repository:** https://github.com/lillyclements/mini-project
+
+---
+
+### Summary
+
+- **Problem:** Estimate the probability that a spacecraft with several independent subsystems completes its mission, and decide where redundancy is worth adding.
+- **Method:** Monte Carlo simulation in Python (NumPy), validated against closed-form reliability theory.
+- **Key results:** Baseline mission reliability 92.24%. One backup on the highest-risk subsystem raises it to 94.55% (+2.31 percentage points). Monte Carlo error scales as N^-0.50 (fitted slope -0.498 ± 0.010).
+- **Extension:** A beta-factor common-cause model shows that correlated failures erode the value of redundancy (full duplication: 99.86% at β = 0 vs. 98.32% at β = 0.2).
+
 ---
 
 ## 1. Project Overview
@@ -34,11 +45,13 @@ In spacecraft design, engineers must make critical decisions about system archit
 The tool implements:
 - Monte Carlo simulation for series reliability estimation
 - Analytical verification for independent subsystems
-- Redundancy modeling (cold spares / parallel redundancy)
+- Redundancy modeling (active parallel redundancy)
 - Convergence analysis demonstrating O(1/√N) behavior
 - Statistical variance analysis
 - Edge case verification tests
 - Command-line interface for flexible usage
+- Common-cause failure modeling (beta-factor) with analytical verification
+- Vectorized Monte Carlo and a repeated-run convergence study (`reliability_extensions.py`)
 
 ---
 
@@ -78,10 +91,10 @@ For a binomial proportion with true value p:
 - To halve the error, need 4× more samples
 - 95% confidence interval: p ± 1.96σ
 
-**Practical implications:**
-- N = 10,000 gives ~1% accuracy
-- N = 100,000 gives ~0.3% accuracy  
-- N = 1,000,000 gives ~0.1% accuracy
+**Practical implications** (95% confidence half-width, 1.96σ, for this project's baseline R ≈ 0.92):
+- N = 10,000 gives about ±0.5% (±0.0052)
+- N = 100,000 gives about ±0.17% (±0.0017)
+- N = 1,000,000 gives about ±0.05% (±0.0005)
 
 This convergence rate is **slow** compared to deterministic methods, but the simplicity and flexibility of MC often outweigh this disadvantage for early-stage analysis.
 
@@ -109,7 +122,20 @@ For redundant subsystems with redundancy level k:
 
 R_subsystem = 1 - p^k
 
-This provides closed-form solutions to verify Monte Carlo results.
+This provides closed-form solutions to verify Monte Carlo results. Note that adding one backup to subsystem i raises system reliability by exactly R·p_i (because (1 − p_i²)/(1 − p_i) = 1 + p_i), so the subsystem with the largest failure probability always benefits most.
+
+### 2.5 Common-Cause Failures (Beta-Factor Model)
+
+The independent model assumes backups fail independently of the primary, which is optimistic: a single event (radiation, a power-bus fault, a shared software bug) can disable every unit in a redundant group. The beta-factor model splits each unit's failure probability p into:
+
+- an **independent part**, (1 − β)·p, where units fail separately, and
+- a **common-cause part**, β·p, a single event that fails all k units at once.
+
+A redundant group (k > 1) fails if the common-cause event occurs **or** all k units fail independently:
+
+P_group_fail = 1 − (1 − β·p) · (1 − ((1 − β)·p)^k)
+
+For k = 1 the group failure probability is simply p. Setting β = 0 recovers the independent model, and β = 1 makes a backup worthless. The closed form above is used to verify the Monte Carlo implementation (Section 5.6); the simulation is what extends to models with no closed form.
 
 ---
 
@@ -118,19 +144,26 @@ This provides closed-form solutions to verify Monte Carlo results.
 ### 3.1 Code Structure
 
 ```
-spacecraft-reliability/
+mini-project/
 ├── reliability.py              # Main Python module (750+ lines)
 │   ├── monte_carlo_reliability()
 │   ├── analytical_reliability()
 │   ├── convergence_study()
 │   ├── monte_carlo_reliability_with_redundancy()
 │   ├── redundancy_trade_study()
-│   ├── variance_analysis()
+│   ├── monte_carlo_variance_analysis()
 │   ├── edge_case_tests()
 │   └── main() [CLI]
+├── reliability_extensions.py   # Vectorized MC, repeated-run convergence, common-cause model
+│   ├── mc_reliability() [vectorized]
+│   ├── convergence_study() [RMS error, fitted slope]
+│   ├── common_cause_study()
+│   └── verify_common_cause()
 ├── requirements.txt            # numpy, matplotlib
 ├── README.md                   # Documentation
-├── convergence_study.png       # Generated plot
+├── convergence_rms.png         # Generated plot (repeated-run convergence)
+├── common_cause_study.png      # Generated plot (beta-factor study)
+├── convergence_study.png       # Generated plot (original single-run version)
 ├── redundancy_trade_study.png  # Generated plot
 └── variance_analysis.png       # Generated plot
 ```
@@ -144,7 +177,7 @@ spacecraft-reliability/
 **2. NumPy for random number generation**
 - Industry-standard library
 - Well-tested pseudorandom number generator implementation
-- Fast vectorized operations available (though not used here for clarity)
+- Core `reliability.py` uses explicit loops for clarity; `reliability_extensions.py` uses vectorized NumPy (much faster)
 
 **3. Matplotlib for visualization**
 - Standard plotting library in scientific Python
@@ -179,6 +212,13 @@ python reliability.py --run basic --failures 0.01 0.02 --redundancy 1 2
 python reliability.py --run convergence
 ```
 
+**Extensions (repeated-run convergence study and common-cause model):**
+```bash
+python reliability_extensions.py --run convergence   # saves convergence_rms.png
+python reliability_extensions.py --run commoncause   # saves common_cause_study.png
+python reliability_extensions.py --run all
+```
+
 **Dependencies:**
 ```bash
 pip install -r requirements.txt
@@ -189,7 +229,7 @@ pip install -r requirements.txt
 ## 4. Progress Log
 
 **Initial Setup:**
-- Created GitHub repository: `spacecraft-reliability`
+- Created GitHub repository: `mini-project`
 - Set up Python environment with numpy and matplotlib
 - Initialized git with .gitignore
 - Created basic project structure
@@ -204,9 +244,8 @@ pip install -r requirements.txt
 **Convergence Study:**
 - Implemented `convergence_study()` to test N = [100, 500, 1000, ..., 500,000]
 - Created dual-panel plot: estimate convergence + error scaling
-- Confirmed O(1/√N) behavior on log-log plot (slope ≈ -0.5)
-- Error at N=100: ~0.002, Error at N=500,000: ~0.000006
-- Improvement factor: ~325×, close to theoretical √5000 ≈ 70×
+- First version used one MC run per N. Each run's error is itself random: the N=100 run happened to start with a large error (~0.06), which inflated the apparent improvement to ~325× versus the theoretical √5000 ≈ 70×
+- Reworked into a repeated-run study (200 runs per N, RMS error) in `reliability_extensions.py`: fitted log-log slope = -0.498 ± 0.010 (theory -0.5)
 - **Commit:** "Add convergence study with O(1/sqrt(N)) verification"
 
 **Redundancy Feature:**
@@ -230,9 +269,9 @@ pip install -r requirements.txt
 
 **Variance Analysis:**
 - Ran 50 independent MC trials with N=10,000 each
-- Observed std: 0.00269, Theoretical std: 0.00268 (ratio = 1.00) ✓
-- Confirmed estimates follow normal distribution
-- All estimates within 95% confidence interval
+- Observed std: 0.00269, Theoretical std: 0.00267 (ratio ≈ 1.01; with 50 runs the std is only known to about ±10%) ✓
+- Histogram is consistent with the theoretical normal distribution
+- 48 of 50 estimates fall inside the 95% confidence band (96%; 95% expected)
 - **Key learning:** MC uncertainty is predictable and matches theory
 
 **Edge Case Verification:**
@@ -250,13 +289,20 @@ pip install -r requirements.txt
 - Created clear file structure documentation
 - **Commit:** "Add comprehensive docstring and final code polish"
 
+**Review and Extensions (October 2026):**
+- Corrected the analytical baseline from 0.921951 to 0.922438 (the product of the (1 − p_i) terms; every generated plot already showed 0.922438)
+- Made confidence-interval and accuracy figures consistent (σ = √(R(1−R)/N))
+- Replaced "cold spares" with "active parallel redundancy" (the model has no switching logic or standby failures)
+- Added `reliability_extensions.py`: vectorized MC, repeated-run convergence study, beta-factor common-cause model with analytical verification
+- **Commit:** "Add RMS convergence study and common-cause model; correct README values"
+
 ### Challenges Encountered
 
 1. **Git setup confusion:** Initially tried to use existing homework repo, created nested git repositories. Solution: Started fresh in new directory.
 
 2. **Indentation error in CLI:** Mixed indentation levels in the `if args.run in ['all']:` block. Fixed by ensuring consistent 4-space indentation throughout.
 
-3. **Understanding convergence rate:** Initially surprised that 500,000 samples only gave ~325× improvement over 100 samples. Realized this matches √(500000/100) = 70× theoretical scaling, with additional variance from statistical fluctuation.
+3. **Understanding convergence rate:** My first convergence plot used one MC run per N and showed a ~325× error improvement from N=100 to N=500,000, versus ~70× expected from √N scaling. The cause was that a single run's error is itself random (the N=100 run started with a large error). Averaging 200 runs per N and fitting the log-log slope fixed it: -0.498 ± 0.010.
 
 ### What Worked Well
 
@@ -273,34 +319,39 @@ pip install -r requirements.txt
 
 **Test system:** 5 subsystems with failure rates [0.01, 0.02, 0.015, 0.01, 0.025]
 
-**Results (N = 100,000):**
-- Monte Carlo estimate: 0.921847 (92.18%)
-- Analytical solution: 0.921951 (92.20%)
-- Absolute error: 0.000104
-- Relative error: 0.011%
+**Results:**
+- Analytical solution: R = ∏(1 − pᵢ) = **0.922438** (92.24%)
+- Expected statistical uncertainty of a single MC run at N = 100,000: σ = √(R(1−R)/N) = 0.00085 (95% CI ±0.0017)
+- Repeated-run check (200 independent MC runs at N = 100,000, see 5.2): RMS error = 0.000932 vs. theoretical σ = 0.000846 (ratio 1.10)
 
-**Interpretation:** MC estimate matches analytical to 4 decimal places. Error is well within expected statistical uncertainty (±0.0027 at 95% confidence).
+**Interpretation:** MC estimates scatter around the analytical value with the spread theory predicts, at every N tested (RMS error within 10% of theory, see 5.2).
+
+*Note:* The Session 2 transcript quotes an analytical value of 0.921951. The correct product is 0.922438 (the value shown in every generated plot). The conclusion is unchanged: the single-run MC estimate quoted there (0.921847) is within one standard error of the correct value.
 
 ✓ **VERIFICATION PASSED**
 
 ### 5.2 Convergence Study
 
-![Convergence Study](convergence_study.png)
+![Convergence Study](convergence_rms.png)
 
-**Left panel:** MC estimates converge to analytical solution as N increases. By N=500,000, estimate is indistinguishable from true value.
+**Method:** For each N, 200 independent MC estimates were generated and the RMS error relative to the analytical value was computed. A single run's error is itself random, so averaging over repeats is needed to see the true error scaling.
 
-**Right panel:** Log-log plot shows error decreases linearly with slope ≈ -0.5, confirming theoretical O(1/√N) behavior.
+**Result:** The measured RMS error follows the theoretical standard error √(R(1−R)/N) closely. A least-squares fit on the log-log data gives a slope of **-0.498 ± 0.010**, consistent with the theoretical -0.5.
 
 **Quantitative results:**
-| N | Error | Expected Error (√N scaling) |
-|---|---|---|
-| 100 | 0.00195 | (baseline) |
-| 1,000 | 0.00090 | 0.00195/√10 = 0.00062 |
-| 10,000 | 0.00029 | 0.00195/√100 = 0.00020 |
-| 100,000 | 0.00011 | 0.00195/√1000 = 0.00006 |
-| 500,000 | 0.00001 | 0.00195/√5000 = 0.00003 |
+| N | RMS error (200 runs) | Theory √(R(1−R)/N) | Ratio |
+|---|---|---|---|
+| 100 | 0.028392 | 0.026748 | 1.06 |
+| 300 | 0.015005 | 0.015443 | 0.97 |
+| 1,000 | 0.008325 | 0.008458 | 0.98 |
+| 3,000 | 0.005028 | 0.004884 | 1.03 |
+| 10,000 | 0.002570 | 0.002675 | 0.96 |
+| 30,000 | 0.001471 | 0.001544 | 0.95 |
+| 100,000 | 0.000932 | 0.000846 | 1.10 |
 
-Observed errors track theoretical scaling well, with some statistical variation expected.
+Ratios stay within 10% of 1, as expected: an RMS computed from 200 runs is itself uncertain by about 5%.
+
+*Original single-run version:* `convergence_study.png` (one MC run per N, up to N = 500,000) shows the same overall trend but is noisy, which is why it was replaced by the repeated-run study above.
 
 ✓ **CONVERGENCE VERIFIED**
 
@@ -308,9 +359,21 @@ Observed errors track theoretical scaling well, with some statistical variation 
 
 ![Redundancy Trade Study](redundancy_trade_study.png)
 
-**Left panel:** Adding one backup to subsystem 5 (highest failure rate, p=0.025) provides +2.33% reliability improvement—far more than any other subsystem.
+**Left panel:** Adding one backup to subsystem 5 (highest failure rate, p=0.025) provides about +2.3 percentage points of reliability improvement (analytical: +2.31)—more than any other subsystem.
 
 **Right panel:** Clear correlation between baseline failure probability and value of redundancy. Higher-risk components benefit more from backups.
+
+**Analytical check:** Adding one backup to subsystem i raises system reliability by exactly R·pᵢ, where R = 0.922438 is the baseline:
+
+| Subsystem | pᵢ | Gain from one backup (analytical) |
+|---|---|---|
+| 1 | 0.010 | +0.92 percentage points |
+| 2 | 0.020 | +1.84 percentage points |
+| 3 | 0.015 | +1.38 percentage points |
+| 4 | 0.010 | +0.92 percentage points |
+| 5 | 0.025 | +2.31 percentage points |
+
+Monte Carlo estimates of these gains scatter around these values; the noise on a difference of two single-run estimates is about ±0.12 percentage points at N = 100,000.
 
 **Analytical verification for redundancy:**
 - Subsystem with p=0.025, redundancy=2
@@ -323,17 +386,17 @@ Observed errors track theoretical scaling well, with some statistical variation 
 
 ![Variance Analysis](variance_analysis.png)
 
-**Left panel:** Distribution of 50 MC runs shows:
-- Estimates cluster around analytical value (red line)
-- Distribution roughly normal (green curve)
-- Width matches theoretical prediction
+**Left panel:** Distribution of 50 MC runs (N = 10,000 each) shows:
+- Estimates cluster around the analytical value (red line, 0.922438)
+- Spread is consistent with the theoretical normal curve (green); with only 50 runs the histogram is naturally lumpy
+- Width matches the theoretical prediction
 
-**Right panel:** Run-to-run variability contained within 95% confidence interval (green band).
+**Right panel:** 48 of 50 runs (96%) fall inside the 95% confidence band (green); about 2.5 outside is expected.
 
 **Statistical checks:**
-- Theoretical std: 0.002685
+- Theoretical std: √(R(1−R)/N) = 0.002675
 - Observed std: 0.002689
-- Ratio: 1.00 (within 1%)
+- Ratio: 1.01 (a sample std from 50 runs is only accurate to about ±10%, so agreement this close is partly luck)
 
 ✓ **STATISTICAL BEHAVIOR VERIFIED**
 
@@ -349,15 +412,49 @@ All edge case tests passed:
 
 ✓ **ALL EDGE CASES PASSED**
 
-### 5.6 Verification Summary
+### 5.6 Common-Cause Failure Extension (Beta-Factor Model)
+
+![Common-Cause Study](common_cause_study.png)
+
+The independent model cannot represent a single event that disables all backups. The beta-factor model (Section 2.5) adds this: a fraction β of each unit's failure probability is a common-cause event. Because the model also has a closed form, the analytical expression verifies the simulation.
+
+**Verification (one backup on subsystem 5, N = 1,000,000):**
+
+| β | MC estimate | Analytical | Error (in standard errors) | Status |
+|---|---|---|---|---|
+| 0.0 | 0.945877 | 0.945499 | 1.66 | ✓ PASS |
+| 0.1 | 0.943359 | 0.943248 | 0.48 | ✓ PASS |
+| 0.3 | 0.938690 | 0.938707 | 0.07 | ✓ PASS |
+| 1.0 | 0.922477 | 0.922438 | 0.14 | ✓ PASS |
+
+- β = 0 reproduces the independent model (0.945499)
+- β = 1 makes the backup worthless: reliability equals the no-backup baseline (0.922438)
+
+**Results:** Baseline without redundancy is 92.24%.
+
+| β | Gain from one backup on subsystem 5 | Reliability, all subsystems duplicated |
+|---|---|---|
+| 0.00 | +2.31 percentage points | 99.86% |
+| 0.10 | +2.08 percentage points | 99.09% |
+| 0.20 | +1.85 percentage points | 98.32% |
+
+**Takeaways:**
+- **Left panel:** Every subsystem's gain from a backup shrinks as β grows. The ranking is unchanged (the highest-risk subsystem still benefits most) but the absolute benefit falls. Subsystems 1 and 4 share the same failure probability, so their curves overlap.
+- **Right panel:** Full duplication looks excellent in the independent model (99.86%), but at β = 0.2 mission failure probability rises from 0.14% to 1.68%, about 12× higher. Reliability under full duplication falls to roughly 96% at β = 0.5.
+- Independence assumptions for redundant hardware must be justified, not assumed.
+
+✓ **COMMON-CAUSE MODEL VERIFIED**
+
+### 5.7 Verification Summary
 
 | Test Type | Method | Result | Status |
 |-----------|--------|--------|--------|
-| Analytical comparison | Direct calculation | Error < 0.02% | ✓ PASS |
-| Convergence rate | Log-log slope | -0.5 ± 0.05 | ✓ PASS |
-| Statistical variance | 50 independent runs | Matches theory | ✓ PASS |
+| Analytical comparison | Repeated runs vs. closed form | RMS error within 10% of theoretical σ at every N | ✓ PASS |
+| Convergence rate | Log-log slope (200 runs per N) | -0.498 ± 0.010 | ✓ PASS |
+| Statistical variance | 50 independent runs | Std ratio ≈ 1.01; 48/50 inside 95% CI | ✓ PASS |
 | Edge cases | 5 boundary tests | All passed | ✓ PASS |
 | Redundancy model | Analytical formula | Matches MC | ✓ PASS |
+| Common-cause model | β = 0, 0.1, 0.3, 1 vs. closed form | All within 2 standard errors | ✓ PASS |
 
 **Overall:** Implementation is verified to be correct within statistical uncertainty.
 
@@ -372,7 +469,7 @@ All edge case tests passed:
 **Key finding:** Mission reliability is **92.2%**
 
 **Interpretation:**
-- Even with individually reliable components (98-99.5% each), compounding failures reduce overall reliability to 92%
+- Even with individually reliable components (97.5-99% each), compounding failures reduce overall reliability to 92%
 - Weakest link (2.5% failure rate) disproportionately impacts system
 - This demonstrates why redundancy is critical for high-reliability missions
 
@@ -382,17 +479,20 @@ Adding a single backup to subsystem 5 (highest failure rate):
 - Baseline: 92.2%
 - With redundancy: 94.5%
 - **Improvement: +2.3 percentage points**
+- With a 10% common-cause fraction (β = 0.1) the gain drops to +2.08 points (Section 5.6)
 
 **Cost-benefit insight:** Focusing redundancy on highest-risk components provides best return on investment (mass, cost, complexity).
 
 ### 6.3 Convergence Insights
 
-**Practical recommendation:** For early-stage analysis, N=10,000-100,000 provides adequate accuracy (0.1-0.3% error). For final design verification, use N≥500,000 or analytical methods where available.
+**Practical recommendation:** For early-stage analysis, N=10,000-100,000 provides adequate accuracy (±0.5% to ±0.17% at 95% confidence). For final design verification, use N≥500,000 or analytical methods where available.
 
 **Time vs. accuracy tradeoff:**
-- N=10,000: ~0.1 seconds, ±0.3% accuracy
-- N=100,000: ~1 second, ±0.1% accuracy
-- N=1,000,000: ~10 seconds, ±0.03% accuracy
+- N=10,000: ~0.1 seconds, ±0.5% accuracy
+- N=100,000: ~1 second, ±0.17% accuracy
+- N=1,000,000: ~10 seconds, ±0.05% accuracy
+
+(Timings are approximate for the explicit-loop implementation in `reliability.py`. The vectorized version in `reliability_extensions.py` is much faster: the full 200-repeat convergence study up to N = 100,000 runs in about one second.)
 
 For interactive exploration, 10k samples is sufficient. For reporting, use 100k+.
 
@@ -408,6 +508,7 @@ MC provides not just an estimate, but also confidence intervals:
 2. **Target weakest links first:** Redundancy on highest-risk subsystem gives best ROI
 3. **Uncertainty matters:** Report confidence intervals, not just point estimates
 4. **MC is practical:** Simple to implement, easy to extend to complex scenarios
+5. **Correlated failures erode redundancy:** With 20% common-cause failures, full duplication gives 98.3% rather than 99.9%, so independence must be justified
 
 ---
 
@@ -445,8 +546,8 @@ MC provides not just an estimate, but also confidence intervals:
    - Weibull distributions for aging components
    - Mission duration as parameter
 
-2. **Correlated failures**
-   - Common-cause failures (radiation event affecting multiple systems)
+2. **Richer correlated-failure models**
+   - Beta-factor common-cause model is implemented (Section 5.6); next: subsystem-specific β values and the multiple-Greek-letter model
    - Conditional probabilities
 
 3. **Cost modeling**
@@ -486,7 +587,7 @@ The skills developed in this project—MC simulation, convergence analysis, veri
 
 ## 8. LLM Transcript
 **LLM Used:** Claude (Anthropic)  
-**Development Period:** December 6-15, 2024
+**Development Period:** December 6-15, 2025 (core project); October 2026 (review, convergence rework, common-cause extension)
 
 ---
 
@@ -1025,7 +1126,7 @@ if __name__ == "__main__":
 
 This CLI supports custom failure rates, sample sizes, redundancy configurations, and multiple analysis modes.
 
-## Session 5
+## Session 6
 **Date:** December 14, 2025, 4 PM
 
 **Me:**
@@ -1184,12 +1285,26 @@ def edge_case_tests():
 
 ---
 
+## Session 7 (post-submission revision, summarized)
+**Date:** October 10, 2026
+
+**Me:**
+I asked Claude to review the finished report for use in a portfolio. It flagged inconsistencies (date, convergence interpretation, confidence-interval figures, redundancy terminology) and suggested a repeated-run convergence study and a common-cause failure extension.
+
+**Claude:**
+Wrote `reliability_extensions.py` (vectorized MC, repeated-run convergence study, beta-factor common-cause model with analytical verification). I ran it, checked the outputs against the plots, and updated this report. While updating, the analytical baseline quoted in Section 5.1 and Session 2 (0.921951) was found to be wrong; the correct value is 0.922438.
+
+*(This session is summarized, not verbatim.)*
+
+---
+
 ## References
 
 - Data Analysis Using Monte Carlo Simulation, Geeks for Geeks (23 Jul, 2025). 
 - Spacecraft systems: Fortescue (2011). *Spacecraft Systems Engineering* (4th ed.)
 - NumPy Documentation: https://numpy.org/doc/
 - Matplotlib Documentation: https://matplotlib.org/
+- Fleming, K. N. (1975). *A reliability model for common mode failures in redundant safety systems.* (origin of the beta-factor model)
 
 
 ---
